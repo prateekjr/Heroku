@@ -1,9 +1,16 @@
 const express = require("express");
+const bodyParser = require("body-parser");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Route to embed VF page in iframe
-app.get("/", (req, res) => {
+// Parse POST body from Salesforce Canvas
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.json());
+
+// Canvas app endpoint (receives signed request from Salesforce)
+app.post("/", (req, res) => {
+  // req.body contains the signed request from Salesforce
+  // For testing, we just render the VF page iframe
   res.send(`
     <html>
       <body style="margin:0; padding:0; height:100vh;">
@@ -15,6 +22,13 @@ app.get("/", (req, res) => {
         </iframe>
       </body>
     </html>
+  `);
+});
+
+// Optional: redirect GET requests to Canvas endpoint
+app.get("/", (req, res) => {
+  res.send(`
+    <h2>This app is a Salesforce Canvas app. Open it inside Salesforce only.</h2>
   `);
 });
 
