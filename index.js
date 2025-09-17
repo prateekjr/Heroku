@@ -1,48 +1,72 @@
 const express = require("express");
+const session = require("express-session");
 const axios = require("axios");
-const bodyParser = require("body-parser");
-const app = express();
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(bodyParser.json());
+const querystring = require("querystring");
 
+const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ---- Get Salesforce Access Token ----
-async function getAccessToken() {
-  const response = await axios.post(
-    `${process.env.SFDC_LOGIN_URL}/services/oauth2/token`,
-    new URLSearchParams({
-      grant_type: "password",
-      client_id: process.env.SFDC_CLIENT_ID,
-      client_secret: process.env.SFDC_CLIENT_SECRET,
-      username: process.env.SFDC_USERNAME,
-      password: process.env.SFDC_PASSWORD
-    })
-  );
-  return response.data;
-}
+// Session middleware (to keep user state in Heroku app)
+app.use(session({
+  secret: "supersecret",
+  resave: false,
+  saveUninitialized: true
+}));
 
-// ---- Route: Show VF Page ----
-app.get("/", async (req, res) => {
+// Step 1: Redirect user to Salesforce login
+app.get("/", (req, res) => {
+  const authUrl = `${process.env.SF_LOGIN_URL}/services/oauth2/authorize?response_type=code&client_id=${process.env.SF_CLIENT_ID}&redirect_uri=${process.env.SF_CALLBACK_URL}`;
+  res.redirect(authUrl);
+});
+
+// Step 2: Salesforce redirects here with auth code
+app.get("/oauth/callback", async (req, res) => {
+  const code = req.query.code;
+  if (!code) {
+    return res.send("Error: No code received from Salesforce");
+  }
+
   try {
-    const tokenResponse = await getAccessToken();
-    const accessToken = tokenResponse.access_token;
-    const instanceUrl = tokenResponse.instance_url;
+    // Step 3: Exchange code for access token
+    const tokenResponse = await axios.post(
+      `${process.env.SF_LOGIN_URL}/services/oauth2/token`,
+      querystring.stringify({
+        grant_type: "authorization_code",
+        code: code,
+        client_id: process.env.SF_CLIENT_ID,
+        client_secret: process.env.SF_CLIENT_SECRET,
+        redirect_uri: process.env.SF_CALLBACK_URL
+      }),
+      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+    );
 
-    // Your VF page full URL
-    const vfUrl = `${instanceUrl}/apex/PageBlockSectionItem`;
+    // Save token in session
+    req.session.accessToken = tokenResponse.data.access_token;
+    req.session.instanceUrl = tokenResponse.data.instance_url;
 
-    // Fetch VF page HTML with access token
-    const vfResponse = await axios.get(vfUrl, {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    });
+    // Step 4: Render VF page with session id injected
+    const vfUrl = `${process.env.VF_PAGE_URL}?sid=${req.session.accessToken}`;
 
-    // Send VF page HTML back to user
-    res.send(vfResponse.data);
+    res.send(`
+      <html>
+        <body style="margin:0; padding:0; height:100vh;">
+          <iframe 
+            src="${vfUrl}" 
+            width="100%" 
+            height="100%" 
+            frameborder="0">
+          </iframe>
+        </body>
+      </html>
+    `);
+
   } catch (err) {
-    console.error(err.response?.data || err.message);
-    res.status(500).send("❌ Failed to load VF page");
+    console.error("OAuth Error:", err.response?.data || err.message);
+    res.send("Authentication failed. Check logs.");
   }
 });
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// Start server
+app.listen(PORT, () => {
+  console.log(`Heroku app running on port ${PORT}`);
+});
