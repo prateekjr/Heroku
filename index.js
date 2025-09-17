@@ -45,7 +45,7 @@ app.get("/oauth/callback", async (req, res) => {
     req.session.instanceUrl = tokenResponse.data.instance_url;
 
     // Step 4: Render VF page with session id injected
-    const vfUrl = `${process.env.VF_PAGE_URL}?sid=${req.session.accessToken}`;
+    const vfUrl = `${process.env.SFDC_INSTANCE_URL}?sid=${req.session.accessToken}`;
 
     res.send(`
       <html>
